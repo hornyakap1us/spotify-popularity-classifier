@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Spotify Popularity Classifier — Andrew Hornyak</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:ital,wght@0,300;0,400;0,600;1,300&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --surface: #111118;
+      --surface2: #1a1a24;
+      --border: #2a2a3a;
+      --green: #1db954;
+      --green-dim: #1db95422;
+      --green-mid: #1db95455;
+      --white: #f0f0f5;
+      --muted: #888899;
+      --accent: #ff6b6b;
+      --accent2: #ffd166;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--white);
+      font-family: 'DM Sans', sans-serif;
+      font-weight: 300;
+      line-height: 1.7;
+      overflow-x: hidden;
+    }
+
+    /* Noise texture overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 1000;
+      opacity: 0.4;
+    }
+
+    /* Green glow blob */
+    .bg-glow {
+      position: fixed;
+      top: -200px;
+      right: -200px;
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, #1db95415 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── HEADER ── */
+    header {
+      position: relative;
+      padding: 80px 5% 60px;
+      border-bottom: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    header::after {
+      content: '';
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--green), transparent);
+    }
+
+    .header-eyebrow {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.2em;
+      color: var(--green);
+      text-transform: uppercase;
+      margin-bottom: 20px;
+      opacity: 0;
+      animation: fadeUp 0.6s ease forwards 0.1s;
+    }
+
+    h1 {
+      font-family: 'DM Sans', sans-serif;
+      font-weight: 600;
+      font-size: clamp(2.2rem, 5vw, 4rem);
+      line-height: 1.1;
+      max-width: 700px;
+      opacity: 0;
+      animation: fadeUp 0.6s ease forwards 0.2s;
+    }
+
+    h1 span { color: var(--green); }
+
+    .header-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 24px;
+      margin-top: 32px;
+      opacity: 0;
+      animation: fadeUp 0.6s ease forwards 0.35s;
+    }
+
+    .meta-item {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+
+    .meta-item strong {
+      display: block;
+      color: var(--white);
+      font-size: 0.82rem;
+      margin-bottom: 2px;
+    }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 28px;
+      opacity: 0;
+      animation: fadeUp 0.6s ease forwards 0.45s;
+    }
+
+    .tag {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.65rem;
+      letter-spacing: 0.05em;
+      padding: 4px 12px;
+      border-radius: 2px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      background: var(--surface);
+    }
+
+    .tag.green { border-color: var(--green-mid); color: var(--green); background: var(--green-dim); }
+
+    /* ── NAV ── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(10,10,15,0.9);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 5%;
+      display: flex;
+      gap: 0;
+    }
+
+    nav a {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      text-decoration: none;
+      padding: 16px 20px;
+      border-bottom: 2px solid transparent;
+      transition: color 0.2s, border-color 0.2s;
+    }
+
+    nav a:hover { color: var(--white); border-bottom-color: var(--green); }
+
+    /* ── SECTIONS ── */
+    .container { max-width: 1100px; margin: 0 auto; padding: 0 5%; }
+
+    section { padding: 72px 0; border-bottom: 1px solid var(--border); }
+
+    .section-label {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.65rem;
+      letter-spacing: 0.2em;
+      color: var(--green);
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    h2 {
+      font-family: 'DM Sans', sans-serif;
+      font-weight: 600;
+      font-size: clamp(1.5rem, 3vw, 2.2rem);
+      margin-bottom: 32px;
+      line-height: 1.2;
+    }
+
+    h3 {
+      font-family: 'DM Sans', sans-serif;
+      font-weight: 600;
+      font-size: 1.05rem;
+      margin-bottom: 10px;
+      color: var(--white);
+    }
+
+    p { color: #c0c0cc; margin-bottom: 16px; }
+
+    /* ── OVERVIEW GRID ── */
+    .overview-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 40px;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      padding: 28px 24px;
+      transition: background 0.2s;
+    }
+
+    .stat-card:hover { background: var(--surface2); }
+
+    .stat-num {
+      font-family: 'Space Mono', monospace;
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--green);
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+
+    .stat-label {
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* ── PIPELINE ── */
+    .pipeline {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      position: relative;
+    }
+
+    .pipeline::before {
+      content: '';
+      position: absolute;
+      left: 19px;
+      top: 20px;
+      bottom: 20px;
+      width: 2px;
+      background: linear-gradient(to bottom, var(--green), var(--border));
+    }
+
+    .pipeline-step {
+      display: flex;
+      gap: 24px;
+      padding: 24px 0;
+      opacity: 0;
+      transform: translateX(-12px);
+      animation: fadeRight 0.5s ease forwards;
+    }
+
+    .pipeline-step:nth-child(1) { animation-delay: 0.1s; }
+    .pipeline-step:nth-child(2) { animation-delay: 0.2s; }
+    .pipeline-step:nth-child(3) { animation-delay: 0.3s; }
+    .pipeline-step:nth-child(4) { animation-delay: 0.4s; }
+    .pipeline-step:nth-child(5) { animation-delay: 0.5s; }
+
+    .step-dot {
+      flex-shrink: 0;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: var(--surface2);
+      border: 2px solid var(--green);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.75rem;
+      color: var(--green);
+      font-weight: 700;
+      position: relative;
+      z-index: 1;
+    }
+
+    .step-body { padding-top: 8px; }
+
+    /* ── FINDINGS ── */
+    .findings-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    .finding-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 24px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+
+    .finding-card:hover {
+      border-color: var(--green-mid);
+      transform: translateY(-2px);
+    }
+
+    .finding-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0;
+      width: 3px;
+      height: 100%;
+      background: var(--green);
+    }
+
+    .finding-card.accent::before { background: var(--accent); }
+    .finding-card.accent2::before { background: var(--accent2); }
+
+    .finding-icon {
+      font-size: 1.5rem;
+      margin-bottom: 12px;
+    }
+
+    /* ── MODEL TABLE ── */
+    .model-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.8rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .model-table th {
+      background: var(--surface2);
+      padding: 14px 18px;
+      text-align: left;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .model-table td {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      color: #c0c0cc;
+    }
+
+    .model-table tr:last-child td { border-bottom: none; }
+
+    .model-table tr:hover td { background: var(--surface2); }
+
+    .model-table tr.best td { background: var(--green-dim); }
+    .model-table tr.best td:first-child { color: var(--green); }
+
+    .badge {
+      display: inline-block;
+      font-size: 0.6rem;
+      padding: 2px 8px;
+      border-radius: 2px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .badge.good { background: var(--green-dim); color: var(--green); border: 1px solid var(--green-mid); }
+    .badge.warn { background: #ff6b6b15; color: var(--accent); border: 1px solid #ff6b6b44; }
+
+    /* ── FEATURE BAR ── */
+    .feature-list { display: flex; flex-direction: column; gap: 14px; }
+
+    .feature-row { display: flex; flex-direction: column; gap: 6px; }
+
+    .feature-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+    }
+
+    .feature-name { font-family: 'Space Mono', monospace; color: var(--white); }
+
+    .feature-note { color: var(--muted); font-size: 0.72rem; }
+
+    .bar-track {
+      height: 6px;
+      background: var(--surface2);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      width: 0;
+      animation: barGrow 1s ease forwards;
+    }
+
+    .bar-fill.green { background: var(--green); animation-delay: 0.3s; }
+    .bar-fill.red   { background: var(--accent); animation-delay: 0.4s; }
+    .bar-fill.gold  { background: var(--accent2); animation-delay: 0.5s; }
+
+    /* ── CODE BLOCK ── */
+    .code-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 24px;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.78rem;
+      line-height: 1.8;
+      overflow-x: auto;
+      color: #c0c0cc;
+      position: relative;
+    }
+
+    .code-block .comment { color: #555566; }
+    .code-block .kw { color: #c792ea; }
+    .code-block .fn { color: var(--green); }
+    .code-block .str { color: var(--accent2); }
+    .code-block .num { color: var(--accent); }
+
+    .code-label {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.62rem;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    /* ── STACK ── */
+    .stack-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .stack-pill {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 8px 16px;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: border-color 0.2s, color 0.2s;
+    }
+
+    .stack-pill:hover { border-color: var(--green-mid); color: var(--white); }
+
+    .stack-pill .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+    }
+
+    /* ── FOOTER ── */
+    footer {
+      padding: 48px 5%;
+      text-align: center;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.7rem;
+      color: var(--muted);
+    }
+
+    footer a { color: var(--green); text-decoration: none; }
+
+    /* ── ANIMATIONS ── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes fadeRight {
+      from { opacity: 0; transform: translateX(-12px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    @keyframes barGrow {
+      from { width: 0; }
+      to   { width: var(--w); }
+    }
+
+    /* Intersection observer reveal */
+    .reveal {
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (max-width: 600px) {
+      nav a { padding: 14px 10px; font-size: 0.62rem; }
+      .model-table { font-size: 0.7rem; }
+      .model-table th, .model-table td { padding: 10px 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="bg-glow"></div>
+
+<!-- HEADER -->
+<header>
+  <div class="container">
+    <p class="header-eyebrow">Machine Learning · Classification · Python</p>
+    <h1>Predicting <span>Spotify Song</span> Popularity with Logistic Regression</h1>
+    <div class="header-meta">
+      <div class="meta-item"><strong>Andrew Hornyak</strong>Author</div>
+      <div class="meta-item"><strong>CMPINF 2100</strong>Course</div>
+      <div class="meta-item"><strong>32,833</strong>Songs Analyzed</div>
+      <div class="meta-item"><strong>Logistic Regression</strong>Model Type</div>
+    </div>
+    <div class="tag-row">
+      <span class="tag green">Binary Classification</span>
+      <span class="tag green">Cross-Validation</span>
+      <span class="tag">Python</span>
+      <span class="tag">scikit-learn</span>
+      <span class="tag">statsmodels</span>
+      <span class="tag">seaborn</span>
+      <span class="tag">KMeans Clustering</span>
+      <span class="tag">Hierarchical Clustering</span>
+    </div>
+  </div>
+</header>
+
+<!-- NAV -->
+<nav>
+  <a href="#overview">Overview</a>
+  <a href="#pipeline">Pipeline</a>
+  <a href="#findings">Findings</a>
+  <a href="#models">Models</a>
+  <a href="#features">Features</a>
+  <a href="#stack">Stack</a>
+</nav>
+
+<!-- OVERVIEW -->
+<section id="overview">
+  <div class="container">
+    <div class="section-label">01 — Overview</div>
+    <h2>Project at a Glance</h2>
+    <div class="overview-grid reveal">
+      <div class="stat-card">
+        <div class="stat-num">32,833</div>
+        <div class="stat-label">Spotify tracks</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">23</div>
+        <div class="stat-label">Features per track</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">6</div>
+        <div class="stat-label">Playlist genres</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">28</div>
+        <div class="stat-label">Coefficients (best model)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">3</div>
+        <div class="stat-label">Models compared</div>
+      </div>
+    </div>
+
+    <div class="reveal">
+      <h3>Problem Statement</h3>
+      <p>
+        Given Spotify's audio feature data — danceability, energy, loudness, tempo, speechiness, and more — can we reliably predict whether a track will be popular? This project converts the continuous <code style="font-family:'Space Mono',monospace;color:var(--green);font-size:0.85em">track_popularity</code> score into a binary classification target using the dataset median as a threshold, then applies logistic regression to learn the relationship between audio features and popularity.
+      </p>
+      <p>
+        Songs scoring at or above the median are labeled <strong>Popular (1)</strong>; those below are <strong>Not Popular (0)</strong>. This framing makes the problem tractable with logistic regression, which outputs a probability between 0 and 1 via the sigmoid function.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- PIPELINE -->
+<section id="pipeline">
+  <div class="container">
+    <div class="section-label">02 — Methodology</div>
+    <h2>Analysis Pipeline</h2>
+    <div class="pipeline">
+      <div class="pipeline-step">
+        <div class="step-dot">01</div>
+        <div class="step-body">
+          <h3>Exploratory Data Analysis</h3>
+          <p>Visualized distributions and correlations across all continuous and categorical features using bar charts, heatmaps, box plots, and scatter plots. Identified strong positive correlation between energy and loudness, and a negative trend between both energy/duration and track popularity.</p>
+        </div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-dot">02</div>
+        <div class="step-body">
+          <h3>Unsupervised Clustering</h3>
+          <p>Applied both KMeans and Hierarchical Agglomerative Clustering on standardized audio features. Used elbow method and dendrogram analysis to determine the optimal cluster count. Both methods converged on <strong>6 clusters</strong> — matching the 6 distinct playlist genres in the dataset, suggesting genre is a natural grouping dimension.</p>
+        </div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-dot">03</div>
+        <div class="step-body">
+          <h3>Model Specification & Fitting</h3>
+          <p>Built three logistic regression formulas with increasing complexity: an additive model (28 coefficients), a model with select interactions (56 coefficients), and a higher-order interaction model (198 coefficients). Fit using statsmodels for statistical interpretability (p-values, confidence intervals) and scikit-learn for pipeline integration.</p>
+        </div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-dot">04</div>
+        <div class="step-body">
+          <h3>Prediction & Evaluation</h3>
+          <p>Generated predictions on the training set and evaluated using confusion matrices, ROC curves, and AUC scores. Examined coefficient magnitudes and statistical significance to identify the most influential features. Probability threshold set at 0.50 for class assignment.</p>
+        </div>
+      </div>
+      <div class="pipeline-step">
+        <div class="step-dot">05</div>
+        <div class="step-body">
+          <h3>Stratified Cross-Validation</h3>
+          <p>Used StratifiedKFold with a full scikit-learn Pipeline (StandardScaler + OneHotEncoder via ColumnTransformer + LogisticRegression) to evaluate generalization performance. Cross-validation revealed that the simplest model generalized best, while the two complex models exhibited overfitting.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FINDINGS -->
+<section id="findings">
+  <div class="container">
+    <div class="section-label">03 — Key Findings</div>
+    <h2>What the Data Revealed</h2>
+    <div class="findings-grid">
+      <div class="finding-card reveal">
+        <div class="finding-icon">🎸</div>
+        <h3>Genre is the Strongest Signal</h3>
+        <p>All six <code style="font-family:'Space Mono',monospace;color:var(--green);font-size:0.85em">playlist_genre</code> categories were statistically significant across models. Rock and Pop exerted the largest coefficients, aligning with the clustering result of 6 natural song groupings that mapped directly onto genre.</p>
+      </div>
+      <div class="finding-card accent reveal">
+        <div class="finding-icon">⚡</div>
+        <h3>Energy Hurts Popularity</h3>
+        <p>Despite energy and loudness being highly positively correlated with each other, they had opposite signs in the model: energy's coefficient was <strong>negative</strong>, while loudness was positive. Higher-energy tracks tended to be less popular in this dataset.</p>
+      </div>
+      <div class="finding-card accent2 reveal">
+        <div class="finding-icon">⏱️</div>
+        <h3>Longer Songs = Less Popular</h3>
+        <p><code style="font-family:'Space Mono',monospace;color:var(--accent2);font-size:0.85em">duration_ms</code> showed a consistent negative relationship with popularity. As track length increased, the probability of being classified as popular decreased across all fitted models.</p>
+      </div>
+      <div class="finding-card reveal">
+        <div class="finding-icon">🗂️</div>
+        <h3>Clustering Validates Modeling</h3>
+        <p>KMeans and Hierarchical Clustering independently identified 6 optimal clusters from continuous audio features alone — the same number as the genre categories. This unsupervised result reinforces that genre is a meaningful, latent structure in the data.</p>
+      </div>
+      <div class="finding-card reveal">
+        <div class="finding-icon">🎤</div>
+        <h3>Cluster Specialization</h3>
+        <p>Cluster 0 dominated on <em>speechiness</em> (high spoken-word content), while Cluster 1 dominated on <em>liveness</em> (live performance characteristics). These aligned intuitively with genres like R&amp;B/rap and latin, respectively.</p>
+      </div>
+      <div class="finding-card reveal">
+        <div class="finding-icon">📉</div>
+        <h3>Simplicity Wins</h3>
+        <p>The simplest model (28 coefficients) achieved the best cross-validated test accuracy. The gap between training and test performance grew as model complexity increased, a textbook demonstration of the bias-variance tradeoff.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- MODELS -->
+<section id="models">
+  <div class="container">
+    <div class="section-label">04 — Model Comparison</div>
+    <h2>Cross-Validation Results</h2>
+    <p class="reveal">Three logistic regression formulas were evaluated using Stratified K-Fold cross-validation. The table below summarizes model complexity and generalization behavior.</p>
+    <table class="model-table reveal">
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>Formula Type</th>
+          <th># Coefficients</th>
+          <th>Train Accuracy</th>
+          <th>Test Accuracy (CV)</th>
+          <th>Overfitting?</th>
+          <th>Result</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="best">
+          <td>mod_d</td>
+          <td>All inputs, additive</td>
+          <td>28</td>
+          <td>~60.6%</td>
+          <td>~60.5%</td>
+          <td><span class="badge good">None</span></td>
+          <td><span class="badge good">✓ Best Model</span></td>
+        </tr>
+        <tr>
+          <td>mod_e</td>
+          <td>Select interactions</td>
+          <td>56</td>
+          <td>~59.1%</td>
+          <td>~58.7%</td>
+          <td><span class="badge warn">Moderate</span></td>
+          <td><span class="badge warn">Rejected</span></td>
+        </tr>
+        <tr>
+          <td>mod_f</td>
+          <td>Higher-order interactions</td>
+          <td>198</td>
+          <td>~57.7%</td>
+          <td>~57.4%</td>
+          <td><span class="badge warn">Severe</span></td>
+          <td><span class="badge warn">Rejected</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div style="margin-top:40px;" class="reveal">
+      <div class="code-label">Pipeline Architecture (Best Model)</div>
+      <div class="code-block">
+<span class="comment"># Preprocessing: scale numerics, encode categoricals</span>
+preprocessor = <span class="fn">ColumnTransformer</span>([
+    (<span class="str">'num'</span>, <span class="fn">StandardScaler</span>(), numeric_features),
+    (<span class="str">'cat'</span>, <span class="fn">OneHotEncoder</span>(drop=<span class="str">'first'</span>), categorical_features)
+])
+
+<span class="comment"># Full pipeline with logistic regression</span>
+pipeline = <span class="fn">Pipeline</span>([
+    (<span class="str">'preprocessor'</span>, preprocessor),
+    (<span class="str">'classifier'</span>, <span class="fn">LogisticRegression</span>(max_iter=<span class="num">1000</span>))
+])
+
+<span class="comment"># Stratified K-Fold cross-validation</span>
+cv = <span class="fn">StratifiedKFold</span>(n_splits=<span class="num">5</span>, shuffle=<span class="kw">True</span>)
+scores = <span class="fn">cross_val_score</span>(pipeline, X, y, cv=cv, scoring=<span class="str">'accuracy'</span>)
+      </div>
+    </div>
+
+    <div style="margin-top:48px;" class="reveal">
+      <div class="section-label" style="margin-bottom:12px;">Supplemental Analysis</div>
+      <h3 style="margin-bottom:8px;">Cross-Validation Deep Dive Notebook</h3>
+      <p>A supplemental notebook (<code style="font-family:'Space Mono',monospace;color:var(--green);font-size:0.85em">Part_F_Cross_Validation.ipynb</code>) was built to explore and compare three distinct approaches to stratified CV, isolating the effect of framework and bookkeeping choices on results.</p>
+      <div class="findings-grid" style="margin-top:20px;">
+        <div class="finding-card reveal">
+          <div class="finding-icon">🧮</div>
+          <h3>Method 1 — statsmodels + Manual Preprocessing</h3>
+          <p>StandardScaler and OneHotEncoder applied manually inside each fold. Formula strings updated to match encoded column names. Used in the final notebook.</p>
+        </div>
+        <div class="finding-card reveal">
+          <div class="finding-icon">🔧</div>
+          <h3>Method 2 — sklearn Pipeline (Wide Output)</h3>
+          <p>Patsy design matrices fed into a ColumnTransformer pipeline — numerics scaled, dummies passed through. Train and test scores stored in separate columns.</p>
+        </div>
+        <div class="finding-card reveal">
+          <div class="finding-icon">📐</div>
+          <h3>Method 3 — sklearn Pipeline (Long Output)</h3>
+          <p>Same pipeline as Method 2 with results stored in long format using a <code style="font-family:'Space Mono',monospace;font-size:0.85em">data_split</code> column — directly compatible with seaborn <code style="font-family:'Space Mono',monospace;font-size:0.85em">catplot</code>.</p>
+        </div>
+      </div>
+      <p style="margin-top:20px; color:var(--muted); font-size:0.85rem;">All three methods confirmed the same conclusion: <strong style="color:var(--white)">Model 0 (28 coefficients) generalizes best.</strong> The work also surfaced a discrepancy in Model 2's train/test behavior across methods — a meaningful observation about how patsy interaction terms interact with pipeline preprocessing.</p>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section id="features">
+  <div class="container">
+    <div class="section-label">05 — Feature Importance</div>
+    <h2>Influential Features</h2>
+    <p class="reveal">Based on coefficient magnitude and statistical significance across fitted models. Direction indicates the relationship with the probability of being classified as popular.</p>
+    <div class="feature-list reveal">
+      <div class="feature-row">
+        <div class="feature-meta">
+          <span class="feature-name">playlist_genre (Rock/Pop)</span>
+          <span class="feature-note">↑ positive — strongest categorical predictor</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill green" style="--w: 92%"></div></div>
+      </div>
+      <div class="feature-row">
+        <div class="feature-meta">
+          <span class="feature-name">loudness</span>
+          <span class="feature-note">↑ positive — louder tracks score higher</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill green" style="--w: 74%"></div></div>
+      </div>
+      <div class="feature-row">
+        <div class="feature-meta">
+          <span class="feature-name">energy</span>
+          <span class="feature-note">↓ negative — high-energy tracks less popular</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill red" style="--w: 68%"></div></div>
+      </div>
+      <div class="feature-row">
+        <div class="feature-meta">
+          <span class="feature-name">duration_ms</span>
+          <span class="feature-note">↓ negative — longer songs less popular</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill red" style="--w: 55%"></div></div>
+      </div>
+      <div class="feature-row">
+        <div class="feature-meta">
+          <span class="feature-name">danceability</span>
+          <span class="feature-note">↑ positive — moderate effect</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill gold" style="--w: 42%"></div></div>
+      </div>
+      <div class="feature-row">
+        <div class="feature-meta">
+          <span class="feature-name">acousticness / valence / tempo</span>
+          <span class="feature-note">mixed — context-dependent significance</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill gold" style="--w: 28%"></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- STACK -->
+<section id="stack">
+  <div class="container">
+    <div class="section-label">06 — Tech Stack</div>
+    <h2>Tools & Libraries</h2>
+    <div class="stack-grid reveal">
+      <div class="stack-pill"><span class="dot"></span>Python 3.8</div>
+      <div class="stack-pill"><span class="dot"></span>pandas</div>
+      <div class="stack-pill"><span class="dot"></span>numpy</div>
+      <div class="stack-pill"><span class="dot"></span>scikit-learn</div>
+      <div class="stack-pill"><span class="dot"></span>statsmodels</div>
+      <div class="stack-pill"><span class="dot"></span>patsy</div>
+      <div class="stack-pill"><span class="dot"></span>seaborn</div>
+      <div class="stack-pill"><span class="dot"></span>matplotlib</div>
+      <div class="stack-pill"><span class="dot"></span>scipy (hierarchy)</div>
+      <div class="stack-pill"><span class="dot"></span>KMeans Clustering</div>
+      <div class="stack-pill"><span class="dot"></span>Hierarchical Clustering</div>
+      <div class="stack-pill"><span class="dot"></span>StratifiedKFold CV</div>
+      <div class="stack-pill"><span class="dot"></span>ColumnTransformer</div>
+      <div class="stack-pill"><span class="dot"></span>OneHotEncoder</div>
+      <div class="stack-pill"><span class="dot"></span>StandardScaler</div>
+      <div class="stack-pill"><span class="dot"></span>ROC AUC</div>
+      <div class="stack-pill"><span class="dot"></span>Confusion Matrix</div>
+    </div>
+
+    <div style="margin-top: 48px;" class="reveal">
+      <h3>Dataset</h3>
+      <p>Spotify Songs dataset — 32,833 tracks across 6 playlist genres (pop, rap, rock, latin, R&amp;B, EDM) with 23 features including Spotify-computed audio characteristics (danceability, energy, valence, tempo, etc.) and metadata. Source: publicly available via TidyTuesday / Kaggle.</p>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <p>Andrew Hornyak &mdash; CMPINF 2100 Final Project</p>
+  <p style="margin-top:8px; color:#444455;">Built with Python · scikit-learn · statsmodels · seaborn</p>
+</footer>
+
+<script>
+  // Intersection Observer for scroll reveals
+  const reveals = document.querySelectorAll('.reveal');
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.1 });
+  reveals.forEach(el => observer.observe(el));
+
+  // Active nav highlight
+  const sections = document.querySelectorAll('section[id]');
+  const navLinks = document.querySelectorAll('nav a');
+  window.addEventListener('scroll', () => {
+    let current = '';
+    sections.forEach(s => {
+      if (window.scrollY >= s.offsetTop - 100) current = s.id;
+    });
+    navLinks.forEach(a => {
+      a.style.borderBottomColor = a.getAttribute('href') === '#' + current ? 'var(--green)' : 'transparent';
+      a.style.color = a.getAttribute('href') === '#' + current ? 'var(--white)' : '';
+    });
+  });
+</script>
+</body>
+</html>
